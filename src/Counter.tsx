@@ -1,14 +1,17 @@
 import React from 'react';
-import { useState } from "./hookstate-simplified";
+
+function useState() {
+    React.useState(0);
+    React.useEffect(() => {
+        return () => {}
+    });
+}
 
 function Counter() {
 	useState();
 	React.useState(0);
-
 	return (
-		<div>
-			<h1>Open React Dev Tools Components panel, click on Counter component and observe the crash in the logging console.</h1>
-		</div>
+		<div>Open React Dev Tools Components panel, click on Counter component and observe the crash in the logging console.</div>
 	);
 }
 
