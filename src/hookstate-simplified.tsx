@@ -2,7 +2,7 @@ import React from 'react';
 
 export type Path = ReadonlyArray<string | number>;
 
-export type SetInitialStateAction<S> = S /*| Promise<S> | (() => S | Promise<S>)*/
+export type SetInitialStateAction<S> = S
 
 export interface StateMethods<S> {
 }
@@ -10,7 +10,6 @@ export interface StateMethods<S> {
 export type State<S> = StateMethods<S>
 
 export type StateValueAtRoot = any; //tslint:disable-line: no-any
-export type StateValueAtPath = any; //tslint:disable-line: no-any
 export function createState<S>(
     initial: SetInitialStateAction<S>
 ): State<S> {
@@ -23,11 +22,7 @@ export function useState<S>(
 ): State<S>
 {
     const [value, setValue] = React.useState(() => ({ state: createStore(source) }));
-    const result = useSubscribedStateMethods<S>(
-        value.state,
-        RootPath,
-        () => setValue({ state: value.state }),
-        value.state);
+    const result = useSubscribedStateMethods<S>(value.state);
     return result.self;
 }
 
@@ -62,110 +57,42 @@ enum ErrorId {
 }
 
 class StateInvalidUsageError extends Error {
-    constructor(path: Path, id: ErrorId, details?: string) {
-        super(`Error: HOOKSTATE-${id} [path: /${path.join('/')}${details ? `, details: ${details}` : ''}]. ` +
+    constructor(id: ErrorId, details?: string) {
+        super(`Error: HOOKSTATE-${id} [${details ? `, details: ${details}` : ''}]. ` +
             `See https://hookstate.js.org/docs/exceptions#hookstate-${id}`)
     }
 }
 
-interface Subscriber {
-}
-
-interface Subscribable {
-    subscribe(l: Subscriber): void;
-    unsubscribe(l: Subscriber): void;
-}
-
-
 const RootPath: Path = [];
 
-
-class Store implements Subscribable {
-    private _edition: number = 0;
-
-    private _subscribers: Set<Subscriber> = new Set();
-
+class Store {
     constructor(private _value: StateValueAtRoot) {
     }
 
-    get edition() {
-        return this._edition;
-    }
-
-    // get promised() {
-    //     return this._promised;
-    // }
-
-    get(path: Path) {
+    get() {
         let result = this._value;
-        // if (result === none) {
-        //     return result;
-        // }
-        path.forEach(p => {
-            result = result[p];
-        });
         return result;
     }
 
     toMethods() {
         return new StateMethodsImpl<StateValueAtRoot>(
             this,
-            RootPath,
-            this.get(RootPath),
-            this.edition,
-            OnSetUsedNoAction
+            this.get()
         )
     }
 
-    subscribe(l: Subscriber) {
-        this._subscribers.add(l);
-    }
-
-    unsubscribe(l: Subscriber) {
-        this._subscribers.delete(l);
-    }
-
     toJSON() {
-        throw new StateInvalidUsageError(RootPath, ErrorId.ToJson_Value);
+        throw new StateInvalidUsageError(ErrorId.ToJson_Value);
     }
 }
 
-function OnSetUsedNoAction() { /** no action callback */ }
-
-// use symbol to mark that a function has no effect anymore
-const UnmountedMarker = Symbol('UnmountedMarker');
-OnSetUsedNoAction[UnmountedMarker] = true
-
-class StateMethodsImpl<S> implements StateMethods<S>, /*StateMethodsDestroy,*/ Subscribable, Subscriber {
-    private subscribers: Set<Subscriber> | undefined;
-
-    // private isDowngraded: boolean | undefined;
-    // private childrenCache: Record<string | number, StateMethodsImpl<StateValueAtPath>> | undefined;
+class StateMethodsImpl<S> implements StateMethods<S> {
     private selfCache: State<S> | undefined;
-    // private valueCache: StateValueAtPath = ValueUnusedMarker;
     
     constructor(
         public readonly state: Store,
-        public readonly path: Path,
         private valueSource: S,
-        private valueEdition: number,
-        private readonly onSetUsed: () => void
     ) { }
-
-    subscribe(l: Subscriber) {
-        if (this.subscribers === undefined) {
-            this.subscribers = new Set();
-        }
-        this.subscribers.add(l);
-    }
-
-    unsubscribe(l: Subscriber) {
-        this.subscribers!.delete(l);
-    }
-    
-    onUnmount() {
-        this.onSetUsed[UnmountedMarker] = true
-    }
 
     get self(): State<S> {
         if (this.selfCache) {
@@ -180,21 +107,21 @@ class StateMethodsImpl<S> implements StateMethods<S>, /*StateMethodsDestroy,*/ S
                 return undefined
             }
             if (key === 'toJSON') {
-                throw new StateInvalidUsageError(this.path, ErrorId.ToJson_State);
+                throw new StateInvalidUsageError(ErrorId.ToJson_State);
             }
             
             throw "Expected to be unreachable in this reproducer"
             
         }
         
-        this.selfCache = proxyWrap(this.path, this.valueSource,
+        this.selfCache = proxyWrap(this.valueSource,
             () => {
                 // this.get() // get latest & mark used
                 return this.valueSource
             },
             getter,
             (_, key, value) => {
-                throw new StateInvalidUsageError(this.path, ErrorId.SetProperty_State)
+                throw new StateInvalidUsageError(ErrorId.SetProperty_State)
             },
             false) as unknown as State<S>;
         return this.selfCache
@@ -202,7 +129,6 @@ class StateMethodsImpl<S> implements StateMethods<S>, /*StateMethodsDestroy,*/ S
 }
 
 function proxyWrap(
-    path: Path,
     // tslint:disable-next-line: no-any
     targetBootstrap: any,
     // tslint:disable-next-line: no-any
@@ -214,7 +140,7 @@ function proxyWrap(
     isValueProxy: boolean
 ) {
     const onInvalidUsage = (op: ErrorId) => {
-        throw new StateInvalidUsageError(path, op)
+        throw new StateInvalidUsageError(op)
     }
     if (typeof targetBootstrap !== 'object' || targetBootstrap === null) {
         targetBootstrap = {}
@@ -312,17 +238,11 @@ function createStore<S>(initial: SetInitialStateAction<S>): Store {
 }
 
 function useSubscribedStateMethods<S>(
-    state: Store,
-    path: Path,
-    update: () => void,
-    subscribeTarget: Subscribable
+    state: Store
 ) {
     const link = new StateMethodsImpl<S>(
         state,
-        path,
-        state.get(path),
-        state.edition,
-        update,
+        state.get()
     );
     React.useEffect(() => {
         return () => {
