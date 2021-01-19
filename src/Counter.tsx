@@ -2,8 +2,8 @@ import React from 'react';
 import { useState } from "./hookstate-simplified";
 
 function Counter() {
-	const counter = useState(0);
-	const test = React.useState(0);
+	useState();
+	React.useState(0);
 
 	return (
 		<div>
